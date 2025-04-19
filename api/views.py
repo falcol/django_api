@@ -246,14 +246,14 @@ class UpdateUserInfoView(APIView):
 )
 class RefreshTokenView(APIView):
     def post(self, request):
-        refresh_token = request.data.get("refresh")
+        refresh_token = request.data.get("refresh_token")
         if refresh_token is None:
             return Response({"error": "Refresh token is required"}, status=400)
 
         try:
             refresh = RefreshToken(refresh_token)
             new_access_token = refresh.access_token
-            return Response({"access": str(new_access_token)})
+            return Response({"access_token": str(new_access_token)})
         except Exception as e:
             return Response({"error": str(e)}, status=400)
 
