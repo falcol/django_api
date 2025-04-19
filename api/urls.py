@@ -1,5 +1,6 @@
 # create urls for the api
 from django.urls import path
+
 from . import views
 
 urlpatterns = [

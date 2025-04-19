@@ -1,18 +1,44 @@
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from rest_framework_simplejwt.tokens import RefreshToken
-from django.contrib.auth.models import User
-from django.contrib.auth import authenticate
-from django.core.exceptions import ValidationError
-from django.contrib.auth.password_validation import validate_password
-from django.utils import timezone
 import logging
+
+from django.contrib.auth import authenticate
+from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
+from django.utils import timezone
+from drf_spectacular.utils import extend_schema
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
 
 logger = logging.getLogger(__name__)
 
 
 # Create your views here.
+@extend_schema(
+    summary="Register a new user",
+    description="Registers a new user with a username and password. Returns JWT tokens upon success.",
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "username": {"type": "string"},
+                "password": {"type": "string"},
+            },
+            "required": ["username", "password"],
+        }
+    },
+    responses={
+        201: {
+            "type": "object",
+            "properties": {
+                "refresh": {"type": "string"},
+                "access": {"type": "string"},
+            },
+        },
+        400: {"type": "object", "properties": {"error": {"type": "string"}}},
+    },
+)
 class RegisterView(APIView):
     def post(self, request):
         username = request.data.get("username")
@@ -59,6 +85,30 @@ class RegisterView(APIView):
             )
 
 
+@extend_schema(
+    summary="Login a user",
+    description="Authenticates a user with a username and password. Returns JWT tokens upon success.",
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "username": {"type": "string"},
+                "password": {"type": "string"},
+            },
+            "required": ["username", "password"],
+        }
+    },
+    responses={
+        200: {
+            "type": "object",
+            "properties": {
+                "refresh": {"type": "string"},
+                "access": {"type": "string"},
+            },
+        },
+        400: {"type": "object", "properties": {"error": {"type": "string"}}},
+    },
+)
 class LoginView(APIView):
     def post(self, request):
         username = request.data.get("username")
@@ -79,6 +129,11 @@ class LoginView(APIView):
         return Response({"error": "Invalid Credentials"}, status=400)
 
 
+@extend_schema(
+    summary="Access a protected view",
+    description="Returns a message if the user is authenticated.",
+    responses={200: {"type": "object", "properties": {"message": {"type": "string"}}}},
+)
 class ProtectedView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -86,6 +141,24 @@ class ProtectedView(APIView):
         return Response({"message": "This is a protected view"})
 
 
+@extend_schema(
+    summary="Get user information",
+    description="Returns the authenticated user's information.",
+    responses={
+        200: {
+            "type": "object",
+            "properties": {
+                "username": {"type": "string"},
+                "email": {"type": "string"},
+                "first_name": {"type": "string"},
+                "last_name": {"type": "string"},
+                "date_joined": {"type": "string", "format": "date-time"},
+                "last_login": {"type": "string", "format": "date-time"},
+                "is_active": {"type": "boolean"},
+            },
+        }
+    },
+)
 class UserInfoView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -98,10 +171,30 @@ class UserInfoView(APIView):
             "last_name": user.last_name,
             "date_joined": user.date_joined,
             "last_login": user.last_login,
+            "is_active": user.is_active,
         }
         return Response(user_info)
 
 
+@extend_schema(
+    summary="Update user information",
+    description="Updates the authenticated user's information. Optionally updates the password.",
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "email": {"type": "string"},
+                "first_name": {"type": "string"},
+                "last_name": {"type": "string"},
+                "password": {"type": "string"},
+            },
+        }
+    },
+    responses={
+        200: {"type": "object", "properties": {"message": {"type": "string"}}},
+        400: {"type": "object", "properties": {"error": {"type": "string"}}},
+    },
+)
 class UpdateUserInfoView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -134,6 +227,23 @@ class UpdateUserInfoView(APIView):
             )
 
 
+@extend_schema(
+    summary="Refresh access token",
+    description="Generates a new access token using a refresh token.",
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "refresh": {"type": "string"},
+            },
+            "required": ["refresh"],
+        }
+    },
+    responses={
+        200: {"type": "object", "properties": {"access": {"type": "string"}}},
+        400: {"type": "object", "properties": {"error": {"type": "string"}}},
+    },
+)
 class RefreshTokenView(APIView):
     def post(self, request):
         refresh_token = request.data.get("refresh")
@@ -148,6 +258,23 @@ class RefreshTokenView(APIView):
             return Response({"error": str(e)}, status=400)
 
 
+@extend_schema(
+    summary="Logout a user",
+    description="Blacklists the provided refresh token to log out the user.",
+    request={
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "refresh": {"type": "string"},
+            },
+            "required": ["refresh"],
+        }
+    },
+    responses={
+        200: {"type": "object", "properties": {"message": {"type": "string"}}},
+        400: {"type": "object", "properties": {"error": {"type": "string"}}},
+    },
+)
 class LogoutView(APIView):
     def post(self, request):
         refresh_token = request.data.get("refresh")
@@ -159,4 +286,4 @@ class LogoutView(APIView):
             refresh.blacklist()
             return Response({"message": "Logout successful"})
         except Exception as e:
-            return Response({"error": str(e)}, status=400)  # noqa
+            return Response({"error": str(e)}, status=400)
