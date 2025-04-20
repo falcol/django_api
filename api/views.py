@@ -1,15 +1,18 @@
 import logging
 
-from django.contrib.auth import authenticate
-from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.utils import timezone
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
+from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
+
+from api.models import User
+from api.serializers import AuthTokenSerializer, LoginSerializer, UserSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +20,7 @@ logger = logging.getLogger(__name__)
 # Create your views here.
 @extend_schema(
     summary="Register a new user",
+    tags=["Authentication"],
     description="Registers a new user with a username and password. Returns JWT tokens upon success.",
     request={
         "application/json": {
@@ -40,6 +44,7 @@ logger = logging.getLogger(__name__)
     },
 )
 class RegisterView(APIView):
+    name = 'RegisterView'
     def post(self, request):
         username = request.data.get("username")
         password = request.data.get("password")
@@ -85,64 +90,62 @@ class RegisterView(APIView):
             )
 
 
-@extend_schema(
-    summary="Login a user",
-    description="Authenticates a user with a username and password. Returns JWT tokens upon success.",
-    request={
-        "application/json": {
-            "type": "object",
-            "properties": {
-                "username": {"type": "string"},
-                "password": {"type": "string"},
-            },
-            "required": ["username", "password"],
-        }
-    },
-    responses={
-        200: {
-            "type": "object",
-            "properties": {
-                "refresh": {"type": "string"},
-                "access": {"type": "string"},
-            },
-        },
-        400: {"type": "object", "properties": {"error": {"type": "string"}}},
-    },
-)
 class LoginView(APIView):
+    serializer_class = LoginSerializer
+    name = 'LoginView'
+
+    @extend_schema(
+        request=LoginSerializer,
+        tags=['Authentication'],
+        summary='Đăng nhập',
+        responses={
+            200: OpenApiResponse(AuthTokenSerializer, description='Đăng nhập thành công'),
+            400: OpenApiResponse(description='Lỗi dữ liệu đầu vào'),
+        }
+    )
     def post(self, request):
-        username = request.data.get("username")
-        password = request.data.get("password")
-        user = authenticate(username=username, password=password)
-        if user is not None:
-            # Update last login
-            user.last_login = timezone.now()
-            user.save()
-
+        serializer = self.serializer_class(data=request.data)
+        if serializer.is_valid(raise_exception=True):
+            user = serializer.validated_data
             refresh = RefreshToken.for_user(user)
-            return Response(
-                {
-                    "refresh": str(refresh),
-                    "access": str(refresh.access_token),
-                }
+            access_token = str(refresh.access_token)
+
+            user_serializer = UserSerializer(user) # Serialize trực tiếp user
+            response_data = {
+                'user': user_serializer.data,
+                'accessToken': access_token,
+            }
+            response = Response(response_data, status=status.HTTP_200_OK)
+            response.set_cookie(
+                key='refreshToken',
+                value=str(refresh),
+                httponly=True,
+                samesite='Lax', # Hoặc 'Strict' tùy theo nhu cầu
+                secure=False, # Thay đổi thành True nếu bạn sử dụng HTTPS
+                path='/'
             )
-        return Response({"error": "Invalid Credentials"}, status=400)
+            return response
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-@extend_schema(
-    summary="Access a protected view",
-    description="Returns a message if the user is authenticated.",
-    responses={200: {"type": "object", "properties": {"message": {"type": "string"}}}},
-)
 class ProtectedView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = (IsAuthenticated,)
+    name = 'ProtectedView'
 
+    @extend_schema(
+        responses={
+            200: OpenApiResponse(description='Dữ liệu API được bảo vệ'),
+            401: OpenApiResponse(description='Không được xác thực'),
+        },
+    )
     def get(self, request):
-        return Response({"message": "This is a protected view"})
+        content = {'message': 'API này chỉ dành cho người dùng đã xác thực.'}
+        return Response(content)
 
 
 @extend_schema(
     summary="Get user information",
+    tags=["User"],
     description="Returns the authenticated user's information.",
     responses={
         200: {
@@ -161,6 +164,7 @@ class ProtectedView(APIView):
 )
 class UserInfoView(APIView):
     permission_classes = [IsAuthenticated]
+    name = 'UserInfoView'
 
     def get(self, request):
         user: User = request.user
@@ -172,6 +176,7 @@ class UserInfoView(APIView):
             "date_joined": user.date_joined,
             "last_login": user.last_login,
             "is_active": user.is_active,
+            "time": timezone.now(),
         }
         return Response(user_info)
 
@@ -197,6 +202,7 @@ class UserInfoView(APIView):
 )
 class UpdateUserInfoView(APIView):
     permission_classes = [IsAuthenticated]
+    name = 'UpdateUserInfoView'
 
     def put(self, request):
         user: User = request.user
@@ -227,63 +233,56 @@ class UpdateUserInfoView(APIView):
             )
 
 
-@extend_schema(
-    summary="Refresh access token",
-    description="Generates a new access token using a refresh token.",
-    request={
-        "application/json": {
-            "type": "object",
-            "properties": {
-                "refresh": {"type": "string"},
-            },
-            "required": ["refresh"],
-        }
-    },
-    responses={
-        200: {"type": "object", "properties": {"access": {"type": "string"}}},
-        400: {"type": "object", "properties": {"error": {"type": "string"}}},
-    },
-)
 class RefreshTokenView(APIView):
+    name = 'RefreshTokenView'
+    authentication_classes = []
+    permission_classes = []
+    # Không cần xác thực cho view này
+    @extend_schema(
+        responses={
+            200: OpenApiResponse(AuthTokenSerializer, description='Làm mới token thành công'),
+            401: OpenApiResponse(description='Refresh token không hợp lệ hoặc đã hết hạn'),
+        },
+        parameters=[
+            OpenApiParameter(
+                name='refreshToken',
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.COOKIE,
+                description='Refresh token được lưu trong cookie',
+                required=True,
+            ),
+        ]
+    )
     def post(self, request):
-        refresh_token = request.data.get("refresh_token")
-        if refresh_token is None:
-            return Response({"error": "Refresh token is required"}, status=400)
+        refresh_token = request.COOKIES.get('refreshToken') or request.data.get('refreshToken')
+        if not refresh_token:
+            return Response({'error': 'Không tìm thấy refresh token trong cookie.'}, status=status.HTTP_401_UNAUTHORIZED)
 
         try:
             refresh = RefreshToken(refresh_token)
-            new_access_token = refresh.access_token
-            return Response({"access_token": str(new_access_token)})
+            access_token = str(refresh.access_token)
+            user = refresh.user
+
+            response_data = {
+                'user': AuthTokenSerializer(user).data['user'],
+                'accessToken': access_token,
+            }
+            return Response(response_data, status=status.HTTP_200_OK)
         except Exception as e:
-            return Response({"error": str(e)}, status=400)
+            return Response({'error': 'Refresh token không hợp lệ hoặc đã hết hạn.'}, status=status.HTTP_401_UNAUTHORIZED)
 
 
-@extend_schema(
-    summary="Logout a user",
-    description="Blacklists the provided refresh token to log out the user.",
-    request={
-        "application/json": {
-            "type": "object",
-            "properties": {
-                "refresh": {"type": "string"},
-            },
-            "required": ["refresh"],
-        }
-    },
-    responses={
-        200: {"type": "object", "properties": {"message": {"type": "string"}}},
-        400: {"type": "object", "properties": {"error": {"type": "string"}}},
-    },
-)
 class LogoutView(APIView):
-    def post(self, request):
-        refresh_token = request.data.get("refresh")
-        if refresh_token is None:
-            return Response({"error": "Refresh token is required"}, status=400)
+    # permission_classes = (IsAuthenticated,)
+    name = 'LogoutView'
 
-        try:
-            refresh = RefreshToken(refresh_token)
-            refresh.blacklist()
-            return Response({"message": "Logout successful"})
-        except Exception as e:
-            return Response({"error": str(e)}, status=400)
+    @extend_schema(
+        responses={
+            204: OpenApiResponse(description='Đăng xuất thành công (xóa cookie)'),
+            401: OpenApiResponse(description='Không được xác thực'),
+        },
+    )
+    def post(self, request):
+        response = Response(status=status.HTTP_204_NO_CONTENT)
+        response.delete_cookie('refreshToken')
+        return response
