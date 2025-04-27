@@ -113,7 +113,8 @@ class LoginView(APIView):
             user_serializer = UserSerializer(user) # Serialize trực tiếp user
             response_data = {
                 'user': user_serializer.data,
-                'accessToken': access_token,
+                'access': access_token,
+                'refresh': str(refresh),
             }
             response = Response(response_data, status=status.HTTP_200_OK)
             response.set_cookie(
