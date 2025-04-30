@@ -1,15 +1,17 @@
 import logging
 
+from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
-from rest_framework import status
+from rest_framework import permissions, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenRefreshView as SimpleJWTRefreshView
 
 from api.models import User
 from api.serializers import AuthTokenSerializer, LoginSerializer, UserSerializer
@@ -90,6 +92,17 @@ class RegisterView(APIView):
             )
 
 
+def set_refresh_cookie(response, refresh_token):
+    response.set_cookie(
+        key=settings.SIMPLE_JWT['AUTH_COOKIE'],
+        value=refresh_token,
+        httponly=True,
+        secure=settings.SIMPLE_JWT['AUTH_COOKIE_SECURE'],
+        samesite=settings.SIMPLE_JWT['AUTH_COOKIE_SAMESITE'],
+        path='/api/',  # giới hạn đường dẫn
+        max_age=7 * 24 * 60 * 60  # 7 ngày
+    )
+
 class LoginView(APIView):
     serializer_class = LoginSerializer
     name = 'LoginView'
@@ -113,18 +126,12 @@ class LoginView(APIView):
             user_serializer = UserSerializer(user) # Serialize trực tiếp user
             response_data = {
                 'user': user_serializer.data,
-                'access': access_token,
-                'refresh': str(refresh),
+                'accessToken': access_token,
+                # 'refresh': str(refresh),
             }
             response = Response(response_data, status=status.HTTP_200_OK)
-            response.set_cookie(
-                key='refreshToken',
-                value=str(refresh),
-                httponly=True,
-                samesite='Lax', # Hoặc 'Strict' tùy theo nhu cầu
-                secure=False, # Thay đổi thành True nếu bạn sử dụng HTTPS
-                path='/'
-            )
+            set_refresh_cookie(response, str(refresh))
+
             return response
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -271,6 +278,31 @@ class RefreshTokenView(APIView):
             return Response(response_data, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({'error': 'Refresh token không hợp lệ hoặc đã hết hạn.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+class CustomTokenRefreshView(SimpleJWTRefreshView):
+    permission_classes = [permissions.AllowAny]
+
+    @extend_schema(
+        responses={
+            200: OpenApiResponse(description='Làm mới token thành công'),
+            401: OpenApiResponse(description='Refresh token không hợp lệ hoặc đã hết hạn'),
+        },
+    )
+    def post(self, request, *args, **kwargs):
+        refresh_token = request.COOKIES.get(settings.SIMPLE_JWT['AUTH_COOKIE'])
+
+        if refresh_token is None:
+            return Response({"detail": "No refresh token provided"}, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Thêm token vào request.data để DRF xử lý
+        request.data['refresh'] = refresh_token
+        response = super().post(request, *args, **kwargs)
+
+        # Trả lại accessToken mới
+        return Response({
+            "accessToken": response.data['access']
+        }, status=status.HTTP_200_OK)
 
 
 class LogoutView(APIView):
