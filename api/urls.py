@@ -12,4 +12,6 @@ urlpatterns = [
     path("protected", views.ProtectedView.as_view()),
     path("me", views.UserInfoView.as_view()),
     path("update-user-info", views.UpdateUserInfoView.as_view()),
+    path("forms/search", views.FormSearchView.as_view()),
+    path("forms/selects", views.FormSelectsView.as_view()),
 ]

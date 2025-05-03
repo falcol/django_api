@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.contrib.auth.password_validation import validate_password
@@ -10,11 +11,19 @@ from rest_framework import permissions, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import InvalidToken
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView as SimpleJWTRefreshView
 
 from api.models import User
-from api.serializers import AuthTokenSerializer, LoginSerializer, UserSerializer
+from api.serializers import (
+    AuthTokenSerializer,
+    FormSearchResultSerializer,
+    LoginSerializer,
+    SelectOptionSerializer,
+    UserSerializer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +56,9 @@ logger = logging.getLogger(__name__)
 )
 class RegisterView(APIView):
     name = 'RegisterView'
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
     def post(self, request):
         username = request.data.get("username")
         password = request.data.get("password")
@@ -106,6 +118,9 @@ def set_refresh_cookie(response, refresh_token):
 class LoginView(APIView):
     serializer_class = LoginSerializer
     name = 'LoginView'
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
 
     @extend_schema(
         request=LoginSerializer,
@@ -281,7 +296,18 @@ class RefreshTokenView(APIView):
 
 
 class CustomTokenRefreshView(SimpleJWTRefreshView):
+    serializer_class = TokenRefreshSerializer  # ✅ THÊM DÒNG NÀY
     permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+
+    def get_serializer(self, *args, **kwargs):
+        refresh_token = self.request.COOKIES.get(settings.SIMPLE_JWT['AUTH_COOKIE'])
+
+        if not refresh_token:
+            raise InvalidToken("No refresh token provided")
+
+        kwargs['data'] = {'refresh': refresh_token}
+        return self.serializer_class(*args, **kwargs)
 
     @extend_schema(
         responses={
@@ -290,19 +316,16 @@ class CustomTokenRefreshView(SimpleJWTRefreshView):
         },
     )
     def post(self, request, *args, **kwargs):
-        refresh_token = request.COOKIES.get(settings.SIMPLE_JWT['AUTH_COOKIE'])
+        serializer = self.get_serializer()
+        try:
+            serializer.is_valid(raise_exception=True)
+        except InvalidToken:
+            return Response({"detail": "Refresh token không hợp lệ hoặc hết hạn"}, status=status.HTTP_401_UNAUTHORIZED)
 
-        if refresh_token is None:
-            return Response({"detail": "No refresh token provided"}, status=status.HTTP_401_UNAUTHORIZED)
-
-        # Thêm token vào request.data để DRF xử lý
-        request.data['refresh'] = refresh_token
-        response = super().post(request, *args, **kwargs)
-
-        # Trả lại accessToken mới
         return Response({
-            "accessToken": response.data['access']
+            "accessToken": serializer.validated_data['access']
         }, status=status.HTTP_200_OK)
+
 
 
 class LogoutView(APIView):
@@ -319,3 +342,128 @@ class LogoutView(APIView):
         response = Response(status=status.HTTP_204_NO_CONTENT)
         response.delete_cookie('refreshToken')
         return response
+
+
+class FormSearchView(APIView):
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("page", int, required=False),
+            OpenApiParameter("pageSize", int, required=False),
+            OpenApiParameter("application_no", str, required=False),
+            OpenApiParameter("title", str, required=False),
+            OpenApiParameter("status", str, required=False),
+            OpenApiParameter("manager", str, required=False),
+            OpenApiParameter("customer_code", str, required=False),
+            OpenApiParameter("register_date_start", str, required=False, description="yyyy-mm-dd"),
+            OpenApiParameter("register_date_end", str, required=False, description="yyyy-mm-dd"),
+            OpenApiParameter("category", str, required=False),
+        ],
+        responses=FormSearchResultSerializer(many=True)
+    )
+    def get(self, request):
+        page = int(request.GET.get("page", 1))
+        page_size = int(request.GET.get("pageSize", 10))
+        query = request.GET
+
+        # Sinh dữ liệu mẫu
+        all_data = []
+        for i in range(1, 201):
+            all_data.append({
+                "id": i,
+                "application_no": f"APP-{i:04}",
+                "title": f"Tiêu đề {i}",
+                "status": "approved" if i % 2 == 0 else "pending",
+                "manager": f"manager{i % 3 + 1}",
+                "customer_code": f"customer{i % 5 + 1}",
+                "register_date": (datetime.now() - timedelta(days=i)).date(),
+                "category": f"category{i % 2 + 1}"
+            })
+
+        # Lọc theo params
+        def match_filter(item):
+            if "application_no" in query and query["application_no"] and query["application_no"] not in item["application_no"]:
+                return False
+            if "title" in query and query["title"] and query["title"].lower() not in item["title"].lower():
+                return False
+            if "status" in query and query["status"] and item["status"] != query["status"]:
+                return False
+            if "manager" in query and query["manager"] and item["manager"] != query["manager"]:
+                return False
+            if "customer_code" in query and query["customer_code"] and item["customer_code"] != query["customer_code"]:
+                return False
+            if "category" in query and query["category"] and item["category"] != query["category"]:
+                return False
+            if "register_date_start" in query and "register_date_end" in query:
+                start = datetime.strptime(query["register_date_start"], "%Y-%m-%d").date()
+                end = datetime.strptime(query["register_date_end"], "%Y-%m-%d").date()
+                if not (start <= item["register_date"] <= end):
+                    return False
+            return True
+
+        filtered_data = list(filter(match_filter, all_data))
+        record_total = len(all_data)
+        record_filtered = len(filtered_data)
+
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated_data = filtered_data[start:end]
+
+        serializer = FormSearchResultSerializer(paginated_data, many=True)
+        return Response({
+            "data": serializer.data,
+            "page": page,
+            "pageSize": page_size,
+            "recordTotal": record_filtered,   # Số lượng sau khi lọc, dùng cho phân trang thực tế
+            "recordAll": record_total         # Tổng số bản ghi trước lọc (nếu cần hiển thị)
+        })
+
+
+
+class FormSelectsView(APIView):
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("field", str, required=True),
+            OpenApiParameter("search", str, required=False),
+            OpenApiParameter("page", int, required=False),
+            OpenApiParameter("pageSize", int, required=False),
+        ],
+        responses=SelectOptionSerializer(many=True)
+    )
+    def get(self, request):
+        field = request.GET.get("field")
+        search = request.GET.get("search", "").lower()
+        page = int(request.GET.get("page", 1))
+        page_size = int(request.GET.get("pageSize", 10))
+
+        match field:
+            case "application_no":
+                options = [{"label": f"APP-{i:04}", "value": f"APP-{i:04}"} for i in range(1, 201)]
+            case "manager":
+                options = [{"label": f"Quản lý {i}", "value": f"manager{i}"} for i in range(1, 4)]
+            case "customer_code":
+                options = [{"label": f"Khách hàng {i}", "value": f"customer{i}"} for i in range(1, 4)]
+            case "category":
+                options = [{"label": f"Loại {i}", "value": f"category{i}"} for i in range(1, 4)]
+            case "status":
+                options = [
+                    {"label": "Đã duyệt", "value": "approved"},
+                    {"label": "Đang chờ", "value": "pending"},
+                ]
+            case _:
+                options = []
+
+        # Lọc search
+        if search:
+            options = [opt for opt in options if search in opt["label"].lower()]
+
+        total = len(options)
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated = options[start:end]
+
+        serializer = SelectOptionSerializer(paginated, many=True)
+        return Response({
+            "data": serializer.data,
+            "currentPage": page,
+            "totalPages": (total + page_size - 1) // page_size
+        })

@@ -49,3 +49,20 @@ class RefreshTokenSerializer(serializers.Serializer):
             raise serializers.ValidationError(str(e))
 
         return {'access': str(refresh.access_token)}
+
+
+class FormSearchResultSerializer(serializers.Serializer):
+    id = serializers.IntegerField(help_text="ID đơn đăng ký")
+    application_no = serializers.CharField(help_text="Số đơn đăng ký")
+    title = serializers.CharField(help_text="Tiêu đề đơn đăng ký")
+    status = serializers.CharField(help_text="Trạng thái xử lý")
+    manager = serializers.CharField(help_text="Người phụ trách xử lý")
+    customer_code = serializers.CharField(help_text="Mã khách hàng")
+    register_date = serializers.DateField(help_text="Ngày đăng ký")
+    category = serializers.CharField(help_text="Phân loại hồ sơ")
+
+
+
+class SelectOptionSerializer(serializers.Serializer):
+    label = serializers.CharField()
+    value = serializers.CharField()
