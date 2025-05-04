@@ -59,10 +59,11 @@ MIDDLEWARE = [
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:9000",
     "http://localhost:5173",
+    "http://localhost:3000",  # Thêm port mặc định của React
 ]
 CORS_ALLOW_CREDENTIALS = True
-CSRF_COOKIE_SAMESITE = "Strict"
-SESSION_COOKIE_SAMESITE = "Strict"
+CSRF_COOKIE_SAMESITE = "Lax"  # Thay đổi từ Strict sang Lax
+SESSION_COOKIE_SAMESITE = "Lax"  # Thay đổi từ Strict sang Lax
 
 
 ROOT_URLCONF = "django_api.urls"
@@ -182,10 +183,12 @@ SIMPLE_JWT = {
     'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
     'SLIDING_TOKEN_LIFETIME': timedelta(minutes=5),
     'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
-    "AUTH_COOKIE": "refreshToken",  # tên cookie
+    "AUTH_COOKIE": "refreshToken",
     "AUTH_COOKIE_HTTP_ONLY": True,
     "AUTH_COOKIE_SECURE": False,     # bật ở production
     "AUTH_COOKIE_SAMESITE": "Lax",
+    "AUTH_COOKIE_PATH": "/",  # Thay đổi path thành root
+    "AUTH_COOKIE_DOMAIN": None,  # Cho phép cookie hoạt động trên tất cả các subdomain
 }
 
 # Spectacular settings

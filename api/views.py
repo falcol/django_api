@@ -108,11 +108,12 @@ def set_refresh_cookie(response, refresh_token):
     response.set_cookie(
         key=settings.SIMPLE_JWT['AUTH_COOKIE'],
         value=refresh_token,
-        httponly=True,
+        httponly=settings.SIMPLE_JWT['AUTH_COOKIE_HTTP_ONLY'],
         secure=settings.SIMPLE_JWT['AUTH_COOKIE_SECURE'],
         samesite=settings.SIMPLE_JWT['AUTH_COOKIE_SAMESITE'],
-        path='/api/',  # giới hạn đường dẫn
-        max_age=7 * 24 * 60 * 60  # 7 ngày
+        path=settings.SIMPLE_JWT.get('AUTH_COOKIE_PATH', '/'),
+        domain=settings.SIMPLE_JWT.get('AUTH_COOKIE_DOMAIN', None),
+        max_age=settings.SIMPLE_JWT['REFRESH_TOKEN_LIFETIME'].total_seconds()
     )
 
 class LoginView(APIView):
@@ -272,13 +273,14 @@ class RefreshTokenView(APIView):
                 type=OpenApiTypes.STR,
                 location=OpenApiParameter.COOKIE,
                 description='Refresh token được lưu trong cookie',
-                required=True,
+                required=False,
             ),
         ]
     )
     def post(self, request):
-        refresh_token = request.COOKIES.get('refreshToken') or request.data.get('refreshToken')
+        refresh_token = request.COOKIES.get(settings.SIMPLE_JWT['AUTH_COOKIE']) or request.data.get('refreshToken')
         if not refresh_token:
+            print("refresh_token ", refresh_token)
             return Response({'error': 'Không tìm thấy refresh token trong cookie.'}, status=status.HTTP_401_UNAUTHORIZED)
 
         try:
@@ -313,6 +315,7 @@ class CustomTokenRefreshView(SimpleJWTRefreshView):
         responses={
             200: OpenApiResponse(description='Làm mới token thành công'),
             401: OpenApiResponse(description='Refresh token không hợp lệ hoặc đã hết hạn'),
+            500: OpenApiResponse(description='Refresh token không hợp lệ hoặc đã hết hạn'),
         },
     )
     def post(self, request, *args, **kwargs):
