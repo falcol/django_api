@@ -1,7 +1,7 @@
 # create urls for the api
 from django.urls import path
 
-from . import views, form_select
+from . import views, form_select, select_parents
 
 urlpatterns = [
     path("register", views.RegisterView.as_view()),
@@ -15,5 +15,6 @@ urlpatterns = [
     path("forms/search", views.FormSearchView.as_view()),
     path("forms/selects", views.FormSelectsView.as_view()),
     path("selects", form_select.FormSelectsView.as_view()),
+    path("select-parents", select_parents.SelectParentChildView.as_view()),
 
 ]
