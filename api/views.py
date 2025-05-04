@@ -122,7 +122,6 @@ class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
     authentication_classes = []
 
-
     @extend_schema(
         request=LoginSerializer,
         tags=['Authentication'],
